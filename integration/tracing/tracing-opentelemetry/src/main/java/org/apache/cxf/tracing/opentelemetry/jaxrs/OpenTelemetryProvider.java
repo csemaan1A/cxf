@@ -21,6 +21,7 @@ package org.apache.cxf.tracing.opentelemetry.jaxrs;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.container.ContainerResponseContext;
@@ -29,11 +30,17 @@ import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.container.Suspended;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.ext.Provider;
+import org.apache.cxf.jaxrs.impl.ContainerRequestContextImpl;
+import org.apache.cxf.message.Message;
 import org.apache.cxf.tracing.opentelemetry.AbstractOpenTelemetryProvider;
 import org.apache.cxf.tracing.opentelemetry.TraceScope;
 
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.semconv.ClientAttributes;
+import io.opentelemetry.semconv.NetworkAttributes;
+import io.opentelemetry.semconv.UserAgentAttributes;
 
 @Provider
 public class OpenTelemetryProvider extends AbstractOpenTelemetryProvider
@@ -52,9 +59,23 @@ public class OpenTelemetryProvider extends AbstractOpenTelemetryProvider
     @Override
     public void filter(final ContainerRequestContext requestContext) throws IOException {
         final TraceScopeHolder<TraceScope> holder = super.startTraceSpan(requestContext.getHeaders(),
-                                                                         requestContext.getUriInfo()
-                                                                             .getRequestUri(),
+                                                                         requestContext.getUriInfo().getRequestUri(),
                                                                          requestContext.getMethod());
+
+        Message message = ((ContainerRequestContextImpl)requestContext).getMessage();
+        HttpServletRequest request = (HttpServletRequest)message.getContextualProperty("HTTP.REQUEST");
+        if (request != null) {
+            Span.current().setAttribute(ClientAttributes.CLIENT_ADDRESS, request.getRemoteAddr());
+            Span.current().setAttribute(ClientAttributes.CLIENT_PORT, request.getRemotePort());
+            Span.current().setAttribute(NetworkAttributes.NETWORK_PEER_ADDRESS, request.getRemoteAddr());
+            Span.current().setAttribute(NetworkAttributes.NETWORK_PEER_PORT, request.getRemotePort());
+            String protocol = request.getProtocol();
+            if (protocol != null && protocol.contains("/")) {
+                String protocolVersion = protocol.split("/")[1];
+                Span.current().setAttribute(NetworkAttributes.NETWORK_PROTOCOL_VERSION, protocolVersion);
+            }
+            Span.current().setAttribute(UserAgentAttributes.USER_AGENT_ORIGINAL, request.getHeader("User-Agent"));
+        }
 
         if (holder != null) {
             requestContext.setProperty(TRACE_SPAN, holder);
@@ -64,8 +85,7 @@ public class OpenTelemetryProvider extends AbstractOpenTelemetryProvider
     @SuppressWarnings("unchecked")
     @Override
     public void filter(final ContainerRequestContext requestContext,
-                       final ContainerResponseContext responseContext)
-        throws IOException {
+                       final ContainerResponseContext responseContext) {
         super.stopTraceSpan(requestContext.getHeaders(), responseContext.getHeaders(),
                             responseContext.getStatus(),
                             (TraceScopeHolder<TraceScope>)requestContext.getProperty(TRACE_SPAN));
