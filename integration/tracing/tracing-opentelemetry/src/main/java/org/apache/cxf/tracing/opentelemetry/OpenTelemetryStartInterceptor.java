@@ -21,6 +21,7 @@ package org.apache.cxf.tracing.opentelemetry;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.apache.cxf.common.injection.NoJSR250Annotations;
 import org.apache.cxf.helpers.CastUtils;
 import org.apache.cxf.interceptor.Fault;
@@ -28,7 +29,11 @@ import org.apache.cxf.message.Message;
 import org.apache.cxf.phase.Phase;
 
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.semconv.ClientAttributes;
+import io.opentelemetry.semconv.NetworkAttributes;
+import io.opentelemetry.semconv.UserAgentAttributes;
 
 @NoJSR250Annotations
 public class OpenTelemetryStartInterceptor extends AbstractOpenTelemetryInterceptor {
@@ -50,6 +55,20 @@ public class OpenTelemetryStartInterceptor extends AbstractOpenTelemetryIntercep
 
         if (holder != null) {
             message.getExchange().put(TRACE_SPAN, holder);
+        }
+
+        HttpServletRequest request = (HttpServletRequest)message.getContextualProperty("HTTP.REQUEST");
+        if (request != null) {
+            Span.current().setAttribute(ClientAttributes.CLIENT_ADDRESS, request.getRemoteAddr());
+            Span.current().setAttribute(ClientAttributes.CLIENT_PORT, request.getRemotePort());
+            Span.current().setAttribute(NetworkAttributes.NETWORK_PEER_ADDRESS, request.getRemoteAddr());
+            Span.current().setAttribute(NetworkAttributes.NETWORK_PEER_PORT, request.getRemotePort());
+            String protocol = request.getProtocol();
+            if (protocol != null && protocol.contains("/")) {
+                String protocolVersion = protocol.split("/")[1];
+                Span.current().setAttribute(NetworkAttributes.NETWORK_PROTOCOL_VERSION, protocolVersion);
+            }
+            Span.current().setAttribute(UserAgentAttributes.USER_AGENT_ORIGINAL, request.getHeader("User-Agent"));
         }
     }
 }
